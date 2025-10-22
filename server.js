@@ -14,8 +14,58 @@ const PORT = process.env.PORT || 3001;
 // Store processed event IDs to prevent duplicates
 const processedEvents = new Set();
 
-// Store conversation context per chat
-const conversationContext = new Map();
+// Database functions for conversation persistence
+async function getConversationHistory(chatId) {
+  try {
+    const { data, error } = await supabase
+      .from('conversation_sessions')
+      .select('messages')
+      .eq('chat_id', chatId)
+      .single();
+
+    if (error) {
+      console.log('📭 No existing conversation for chat:', chatId);
+      return [];
+    }
+
+    return data?.messages || [];
+  } catch (error) {
+    console.error('❌ Error fetching conversation:', error);
+    return [];
+  }
+}
+
+async function addToConversation(chatId, userId, userName, message) {
+  try {
+    const history = await getConversationHistory(chatId);
+    history.push({
+      ...message,
+      timestamp: new Date().toISOString()
+    });
+
+    // Keep last 10 messages only
+    const recentHistory = history.slice(-10);
+
+    const { error } = await supabase
+      .from('conversation_sessions')
+      .upsert({
+        chat_id: chatId,
+        user_id: userId,
+        lark_user_name: userName,
+        messages: recentHistory,
+        last_activity: new Date().toISOString(),
+        status: 'active'
+      }, {
+        onConflict: 'chat_id'
+      });
+
+    if (error) {
+      console.error('❌ Error saving conversation:', error);
+    }
+  } catch (error) {
+    console.error('❌ Exception in addToConversation:', error);
+  }
+}
 
 // Response cache for common questions
 const responseCache = new Map();
@@ -739,13 +789,9 @@ async function generateAIResponse(userMessage, chatId, senderId = null) {
     await ensureKnowledgeBaseInitialized();
     
     console.log('🧠 Calling OpenAI with message:', userMessage);
-    
-    // Get or create conversation context
-    if (!conversationContext.has(chatId)) {
-      conversationContext.set(chatId, []);
-    }
-    
-    const context = conversationContext.get(chatId);
+
+    // Get conversation context from database
+    const context = await getConversationHistory(chatId);
     console.log('📚 Current context length:', context.length);
     
     // Check if user is in ticket creation flow
@@ -841,7 +887,21 @@ If these don't resolve your issue, I can create a support ticket for you to get 
         // Update conversation context
         context.push({ role: 'user', content: userMessage });
         context.push({ role: 'assistant', content: faqResponse });
-        
+
+        // Save conversation to database
+        await supabase
+          .from('conversation_sessions')
+          .upsert({
+            chat_id: chatId,
+            user_id: senderId || 'unknown',
+            lark_user_name: 'Unknown',
+            messages: context.slice(-10),
+            last_activity: new Date().toISOString(),
+            status: 'active'
+          }, {
+            onConflict: 'chat_id'
+          });
+
         // Return response with metadata for logging
         return {
           response: faqResponse,
@@ -976,10 +1036,24 @@ If these don't resolve your issue, I can create a support ticket for you to get 
     if (context.length > 20) {
       context.splice(0, context.length - 20);
     }
-    
+
+    // Save conversation to database
+    await supabase
+      .from('conversation_sessions')
+      .upsert({
+        chat_id: chatId,
+        user_id: senderId || 'unknown',
+        lark_user_name: 'Unknown',
+        messages: context.slice(-10),
+        last_activity: new Date().toISOString(),
+        status: 'active'
+      }, {
+        onConflict: 'chat_id'
+      });
+
     const responseTime = Date.now() - startTime;
     trackRequest(userMessage, responseTime, false);
-    
+
     console.log('🎯 OpenAI response received successfully');
     return response;
   } catch (error) {
@@ -1364,7 +1438,6 @@ app.get('/analytics', (req, res) => {
     activeRequests: activeRequests,
     queueLength: requestQueue.length,
     cacheSize: responseCache.size,
-    conversationsActive: conversationContext.size,
     topQuestions: topQuestions,
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
