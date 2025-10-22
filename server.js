@@ -7,6 +7,7 @@ const { createClient } = require('@supabase/supabase-js');
 const messageLogger = require('./message-logger');
 const analyticsAPI = require('./analytics-api');
 const LarkService = require('./services/lark_service');
+const KnowledgeService = require('./services/knowledge_service');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -378,37 +379,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Load PM-Next Application Knowledge Base from markdown file
-const fs = require('fs');
-const path = require('path');
-
-// Dynamic knowledge base loading
-let PM_NEXT_KNOWLEDGE = '';
-let knowledgeBaseInitialized = false;
-const KNOWLEDGE_BASE_PATH = path.join(__dirname, 'knowledge-base.md');
-
-function loadKnowledgeBase() {
-  try {
-    PM_NEXT_KNOWLEDGE = fs.readFileSync(KNOWLEDGE_BASE_PATH, 'utf8');
-    console.log('📚 Knowledge base loaded/reloaded');
-    return PM_NEXT_KNOWLEDGE;
-  } catch (error) {
-    console.error('❌ Error loading knowledge base:', error);
-    return PM_NEXT_KNOWLEDGE; // Return existing knowledge base if reload fails
-  }
-}
-
-// Initial load
-loadKnowledgeBase();
-
-// Watch for knowledge base file changes (optional - for development)
-if (process.env.NODE_ENV !== 'production') {
-  fs.watchFile(KNOWLEDGE_BASE_PATH, (curr, prev) => {
-    console.log('📝 Knowledge base file changed, reloading...');
-    loadKnowledgeBase();
-  });
-}
-
 // Validate environment variables first
 console.log('🔧 Environment variable check:');
 console.log('   - NODE_ENV:', process.env.NODE_ENV);
@@ -437,184 +407,8 @@ const supabase = createClient(
   }
 );
 
-// Knowledge base storage - Hybrid approach: Static file + dynamic database entries
-const KNOWLEDGE_BASE_TABLE = 'knowledge_base'; // Supabase will handle the schema prefix
-
-// Initialize knowledge base table if needed
-async function initKnowledgeBase() {
-  try {
-    // Check if table exists, if not we'll use the markdown file as fallback
-    const { data, error } = await supabase
-      .from(KNOWLEDGE_BASE_TABLE)
-      .select('id')
-      .limit(1);
-    
-    console.log('📚 Knowledge base table check:', error ? 'Using file fallback' : 'Database ready');
-  } catch (error) {
-    console.log('📚 Knowledge base: Using file-based fallback');
-  }
-}
-
-// Ensure knowledge base is initialized (lazy loading for serverless)
-async function ensureKnowledgeBaseInitialized() {
-  if (!knowledgeBaseInitialized) {
-    console.log('🔄 Initializing knowledge base (serverless lazy loading)...');
-    await initKnowledgeBase();
-    await loadKnowledgeBaseFromDB();
-    knowledgeBaseInitialized = true;
-  }
-}
-
-// Load knowledge base from file and supplement with database entries
-async function loadKnowledgeBaseFromDB() {
-  try {
-    // First, always load the static knowledge base from the md file
-    let knowledgeBase = loadKnowledgeBase();
-    
-    // Then try to supplement with dynamic Q&A from database
-    const { data, error } = await supabase
-      .from(KNOWLEDGE_BASE_TABLE)
-      .select('*')
-      .eq('is_active', true) // Only get active entries
-      .order('created_at', { ascending: true });
-    
-    if (error) {
-      console.log('⚠️ Database query failed, using static knowledge base only:', error.message);
-      console.log('🔍 Error code:', error.code);
-      console.log('🔧 Environment:', process.env.VERCEL ? 'Vercel' : 'Local');
-      console.log('🔧 Supabase URL:', process.env.SUPABASE_URL ? 'Set (' + process.env.SUPABASE_URL.substring(0, 30) + '...)' : 'MISSING');
-      console.log('🔧 Supabase key:', process.env.SUPABASE_ANON_KEY ? 'Set (' + process.env.SUPABASE_ANON_KEY.substring(0, 20) + '...)' : 'MISSING');
-      
-      // Check for common production issues
-      if (!process.env.SUPABASE_URL) {
-        console.log('❌ SUPABASE_URL is missing in production environment');
-      }
-      if (!process.env.SUPABASE_ANON_KEY) {
-        console.log('❌ SUPABASE_ANON_KEY is missing in production environment');
-      }
-      if (error.message.includes('permission denied') || error.code === '42501') {
-        console.log('🔐 RLS permission issue - check Supabase RLS policies');
-      }
-      if (error.message.includes('relation') && error.message.includes('does not exist')) {
-        console.log('🗄️ Table does not exist - check schema and table name');
-      }
-      
-      return knowledgeBase;
-    }
-    
-    if (data && data.length > 0) {
-      // Find the end of the "Common User Questions and Answers" section
-      const questionsSection = '## Common User Questions and Answers';
-      const questionsIndex = knowledgeBase.indexOf(questionsSection);
-      
-      if (questionsIndex !== -1) {
-        // Find the next section or end of file
-        const nextSectionIndex = knowledgeBase.indexOf('\n## ', questionsIndex + questionsSection.length);
-        const insertIndex = nextSectionIndex !== -1 ? nextSectionIndex : knowledgeBase.length;
-        
-        // Build additional Q&A entries from database
-        let additionalQA = '\n\n### Additional Support Solutions\n';
-        data.forEach(entry => {
-          additionalQA += `\n### Q: ${entry.question}\n**A**: ${entry.answer}\n`;
-          if (entry.category) {
-            additionalQA += `*Category: ${entry.category}*\n`;
-          }
-        });
-        
-        // Insert the database entries before the next section
-        knowledgeBase = knowledgeBase.slice(0, insertIndex) + additionalQA + '\n' + knowledgeBase.slice(insertIndex);
-        
-        console.log('📚 Knowledge base loaded: Static content + ' + data.length + ' dynamic entries from database');
-      } else {
-        // If we can't find the questions section, append to the end
-        let additionalQA = '\n\n## Additional Support Solutions\n';
-        data.forEach(entry => {
-          additionalQA += `\n### Q: ${entry.question}\n**A**: ${entry.answer}\n`;
-          if (entry.category) {
-            additionalQA += `*Category: ${entry.category}*\n`;
-          }
-        });
-        knowledgeBase += additionalQA;
-        
-        console.log('📚 Knowledge base loaded: Static content + ' + data.length + ' dynamic entries (appended)');
-      }
-    } else {
-      console.log('📚 Knowledge base loaded: Static content only (no database entries)');
-    }
-    
-    PM_NEXT_KNOWLEDGE = knowledgeBase;
-    knowledgeBaseInitialized = true; // Mark as initialized when successful
-    return knowledgeBase;
-    
-  } catch (error) {
-    console.error('❌ Error loading from database, using static knowledge base only:', error);
-    // Fallback to just the static file content
-    const staticKnowledgeBase = loadKnowledgeBase();
-    console.log('📚 Knowledge base loaded: Static content only (database error fallback)');
-    return staticKnowledgeBase;
-  }
-}
-
-// Add Q&A to database instead of file
-async function addToKnowledgeBase(qaPair) {
-  try {
-    // First try database approach
-    const { data, error } = await supabase
-      .from(KNOWLEDGE_BASE_TABLE)
-      .insert([{
-        question: qaPair.question,
-        answer: qaPair.answer,
-        category: qaPair.category,
-        ticket_source: qaPair.ticketNumber || null,
-        created_at: new Date().toISOString()
-      }])
-      .select();
-    
-    if (error) {
-      console.log('⚠️ Database insert failed:', error.message);
-      console.log('🔍 Error details:', JSON.stringify(error, null, 2));
-      console.log('🔧 Environment check:');
-      console.log('   - SUPABASE_URL:', process.env.SUPABASE_URL ? 'Set' : 'Missing');
-      console.log('   - SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? 'Set' : 'Missing');
-      console.log('   - VERCEL environment:', process.env.VERCEL ? 'Yes' : 'No');
-      
-      // Check if it's a permission issue
-      if (error.code === '42501' || error.message.includes('permission denied')) {
-        console.log('🔐 Permission denied - RLS policies may need to be configured');
-        console.log('💡 Check fix-rls-policies.sql for SQL commands to fix this');
-      }
-      
-      // Don't fallback to file updates in production (Vercel)
-      if (process.env.VERCEL) {
-        console.log('❌ Cannot fallback to file updates in Vercel deployment');
-        return false;
-      }
-      
-      // Fallback to file update for local development only
-      console.log('🔄 Falling back to file-based knowledge base update...');
-      return await updateKnowledgeBase(qaPair);
-    }
-    
-    console.log('✅ Knowledge base entry added to database');
-    
-    // Reload knowledge base (static + database content)
-    await loadKnowledgeBaseFromDB();
-    
-    return true;
-    
-  } catch (error) {
-    console.error('❌ Error adding to knowledge base:', error);
-    
-    // Don't fallback to file updates in production (Vercel)
-    if (process.env.VERCEL) {
-      console.log('❌ Cannot fallback to file updates in Vercel deployment');
-      return false;
-    }
-    
-    // Final fallback to file update for local development only
-    return await updateKnowledgeBase(qaPair);
-  }
-}
+// Initialize Knowledge service
+const knowledgeService = new KnowledgeService(supabase);
 
 // Handle Lark events
 app.post('/lark/events', async (req, res) => {
@@ -884,8 +678,8 @@ async function generateAIResponse(userMessage, chatId, senderId = null) {
   
   try {
     // Ensure knowledge base is initialized for serverless environments
-    await ensureKnowledgeBaseInitialized();
-    
+    await knowledgeService.initialize();
+
     console.log('🧠 Calling OpenAI with message:', userMessage);
 
     // Get conversation context from database
@@ -1045,10 +839,10 @@ If these don't resolve your issue, I can create a support ticket for you to get 
         - Always respond to user messages. Never leave a user without a response.
         - Pay attention to conversation context - don't ask for details the user already provided.
         - If user says "still not working" or similar, the system will automatically escalate.
-        
+
         Use this knowledge base about PM-Next:
-        ${PM_NEXT_KNOWLEDGE}
-        
+        ${knowledgeService.getContent()}
+
         ENHANCED RESPONSE GUIDELINES:
           
           1. **Initial Response**: Provide clear, step-by-step instructions for navigation and usage
@@ -1638,10 +1432,10 @@ app.post('/update-knowledge-base', async (req, res) => {
     }
     
     // Update knowledge base (database-first approach)
-    const success = await addToKnowledgeBase({...qaPair, ticketNumber});
+    const success = await knowledgeService.addEntry({...qaPair, ticketNumber});
     if (!success) {
-      return res.status(500).json({ 
-        error: 'Failed to update knowledge base' 
+      return res.status(500).json({
+        error: 'Failed to update knowledge base'
       });
     }
     
@@ -1723,9 +1517,9 @@ This resolves the login issue in most cases.`;
     if (!qaPair) {
       return res.status(500).json({ error: 'Failed to extract Q&A pair' });
     }
-    
-    const success = await updateKnowledgeBase(qaPair);
-    
+
+    const success = await knowledgeService.addEntry(qaPair);
+
     // Clean up test ticket
     await supabase
       .schema('support')
@@ -1804,11 +1598,10 @@ app.get('/knowledge-stats', async (req, res) => {
 // Reload knowledge base endpoint (static + database content)
 app.post('/reload-knowledge-base', async (req, res) => {
   try {
-    const oldLength = PM_NEXT_KNOWLEDGE.length;
-    knowledgeBaseInitialized = false; // Force re-initialization
-    await ensureKnowledgeBaseInitialized(); // Use the serverless-safe approach
-    const newLength = PM_NEXT_KNOWLEDGE.length;
-    
+    const oldLength = knowledgeService.getContent().length;
+    await knowledgeService.reload();
+    const newLength = knowledgeService.getContent().length;
+
     res.json({
       success: true,
       message: 'Knowledge base reloaded successfully (static + dynamic content)',
@@ -1827,10 +1620,9 @@ app.post('/reload-knowledge-base', async (req, res) => {
 // Get current loaded knowledge base content
 app.get('/current-knowledge-base', (req, res) => {
   try {
+    const stats = knowledgeService.getStats();
     res.json({
-      content: PM_NEXT_KNOWLEDGE,
-      size: Math.round(PM_NEXT_KNOWLEDGE.length / 1024 * 100) / 100,
-      qaCount: (PM_NEXT_KNOWLEDGE.match(/### Q:/g) || []).length,
+      ...stats,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -1843,7 +1635,7 @@ app.get('/current-knowledge-base', (req, res) => {
 async function initializeForServerless() {
   console.log('🚀 Serverless environment detected - initializing for Vercel');
   try {
-    await ensureKnowledgeBaseInitialized();
+    await knowledgeService.initialize();
     console.log(`🗄️ Hybrid knowledge base initialized (static + dynamic content)`);
   } catch (error) {
     console.error('⚠️ Knowledge base initialization failed:', error.message);
@@ -1856,9 +1648,9 @@ if (!process.env.VERCEL && !process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCT
   app.listen(PORT, async () => {
     console.log(`🤖 PM-Next Lark Bot server is running on port ${PORT}`);
     console.log(`📝 Health check: http://localhost:${PORT}/health`);
-    
+
     try {
-      await ensureKnowledgeBaseInitialized();
+      await knowledgeService.initialize();
       console.log(`🗄️ Hybrid knowledge base initialized (static + dynamic content)`);
     } catch (error) {
       console.error('⚠️ Knowledge base initialization failed:', error.message);
@@ -2695,80 +2487,6 @@ Extract a Q&A pair from this support interaction.`
 }
 
 /**
- * Update knowledge base with new Q&A
- */
-async function updateKnowledgeBase(qaPair) {
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    const knowledgeBasePath = path.join(__dirname, 'knowledge-base.md');
-    let knowledgeBase = fs.readFileSync(knowledgeBasePath, 'utf8');
-    
-    // Determine where to insert the new Q&A based on category
-    const categoryHeaders = {
-      'candidate_management': '### Q: How do I add a new candidate?',
-      'job_management': '### Q: How do I create a job posting?',
-      'client_management': '### Q: How do I track a deal in the pipeline?',
-      'authentication': '## Troubleshooting Common Issues',
-      'system_performance': '## Troubleshooting Common Issues',
-      'general': '## Common User Questions and Answers'
-    };
-    
-    const category = qaPair.category || 'general';
-    const insertAfterHeader = categoryHeaders[category] || categoryHeaders['general'];
-    
-    // Format the new Q&A entry
-    const newEntry = `
-### Q: ${qaPair.question}
-**A**: ${qaPair.answer}
-`;
-    
-    // Find insertion point
-    const headerIndex = knowledgeBase.indexOf(insertAfterHeader);
-    if (headerIndex === -1) {
-      // If header not found, append to end of Common Questions section
-      const commonQuestionsIndex = knowledgeBase.indexOf('## Common User Questions and Answers');
-      if (commonQuestionsIndex !== -1) {
-        const nextSectionIndex = knowledgeBase.indexOf('## ', commonQuestionsIndex + 1);
-        const insertIndex = nextSectionIndex !== -1 ? nextSectionIndex : knowledgeBase.length;
-        knowledgeBase = knowledgeBase.slice(0, insertIndex) + newEntry + '\n' + knowledgeBase.slice(insertIndex);
-      } else {
-        // If no Common Questions section, append to end
-        knowledgeBase += newEntry;
-      }
-    } else {
-      // Find the end of the current Q&A entry
-      const nextQIndex = knowledgeBase.indexOf('\n### Q:', headerIndex + 1);
-      const nextSectionIndex = knowledgeBase.indexOf('\n## ', headerIndex + 1);
-      
-      let insertIndex;
-      if (nextQIndex !== -1 && (nextSectionIndex === -1 || nextQIndex < nextSectionIndex)) {
-        insertIndex = nextQIndex;
-      } else if (nextSectionIndex !== -1) {
-        insertIndex = nextSectionIndex;
-      } else {
-        insertIndex = knowledgeBase.length;
-      }
-      
-      knowledgeBase = knowledgeBase.slice(0, insertIndex) + newEntry + knowledgeBase.slice(insertIndex);
-    }
-    
-    // Write updated knowledge base
-    fs.writeFileSync(knowledgeBasePath, knowledgeBase);
-    console.log('📚 Knowledge base updated with new Q&A:', qaPair.question);
-    
-    // Reload the knowledge base in memory
-    loadKnowledgeBase();
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Error updating knowledge base:', error);
-    return false;
-  }
-}
-
-/**
  * Process support solution for knowledge base update - ENHANCED
  */
 async function processSupportSolution(message, chatId, senderId, event = null) {
@@ -2839,9 +2557,9 @@ async function processSupportSolution(message, chatId, senderId, event = null) {
     }
     
     console.log('📝 Extracted Q&A pair:', qaPair);
-    
+
     // Update knowledge base (database-first approach)
-    const success = await addToKnowledgeBase({...qaPair, ticketNumber});
+    const success = await knowledgeService.addEntry({...qaPair, ticketNumber});
     if (success) {
       // Update ticket status to resolved
       await supabase

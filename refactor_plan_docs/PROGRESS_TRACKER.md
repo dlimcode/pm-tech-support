@@ -182,18 +182,18 @@
 
 #### KnowledgeService
 
-- [ ] **Extract knowledge functionality**
-  - [ ] Create KnowledgeService class
-  - [ ] Move loadKnowledgeBase logic
-  - [ ] Add search method (prepare for vector search)
-  - [ ] Add add method (for learning loop)
-  - [ ] Export module
+- [x] **Extract knowledge functionality**
+  - [x] Create KnowledgeService class
+  - [x] Move loadKnowledgeBase logic
+  - [x] Add search method (prepare for vector search)
+  - [x] Add add method (for learning loop)
+  - [x] Export module
 
-- [ ] **Update server.js**
-  - [ ] Import KnowledgeService
-  - [ ] Initialize knowledge service
-  - [ ] Update KB loading references
-  - [ ] Test KB retrieval works
+- [x] **Update server.js**
+  - [x] Import KnowledgeService
+  - [x] Initialize knowledge service
+  - [x] Update KB loading references
+  - [x] Test KB retrieval works
 
 ### Service Extraction - Week 4
 
