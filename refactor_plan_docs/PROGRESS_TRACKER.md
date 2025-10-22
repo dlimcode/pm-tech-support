@@ -66,14 +66,14 @@
 
 - [x] **Update handleTicketCreationFlow**
   - [x] Refactor to use database functions
-  - [ ] Test each step (title → description → steps)
-  - [ ] Verify ticket created successfully
-  - [ ] Confirm flow cleanup works
+  - [x] Test each step (title → description → steps)
+  - [x] Verify ticket created successfully
+  - [x] Confirm flow cleanup works
 
 - [x] **Update handleMessage**
   - [x] Change to: `const ticketState = await getTicketFlowState(chatId);`
-  - [ ] Verify flow detection works
-  - [ ] Test routing to handleTicketCreationFlow
+  - [x] Verify flow detection works
+  - [x] Test routing to handleTicketCreationFlow
 
 ### Testing & Validation
 
