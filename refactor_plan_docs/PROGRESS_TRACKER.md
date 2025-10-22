@@ -165,19 +165,20 @@
 
 #### LarkService
 
-- [ ] **Extract Lark functionality**
-  - [ ] Create LarkService class
-  - [ ] Move sendMessage function
-  - [ ] Move getUserInfo function
-  - [ ] Add constructor with appId/appSecret
-  - [ ] Export module
+- [x] **Extract Lark functionality**
+  - [x] Create LarkService class
+  - [x] Move sendMessage function
+  - [x] Move getUserInfo function
+  - [x] Add constructor with appId/appSecret
+  - [x] Export module
 
-- [ ] **Update server.js**
-  - [ ] Import LarkService
-  - [ ] Initialize: `const lark = new LarkService(...)`
-  - [ ] Replace sendMessage() calls
-  - [ ] Replace getUserInfo() calls
-  - [ ] Test all Lark operations work
+- [x] **Update server.js**
+  - [x] Import LarkService
+  - [x] Initialize: `const larkService = new LarkService(...)`
+  - [x] Replace sendMessage() calls (6 occurrences)
+  - [x] Replace getUserInfo() calls (4 occurrences)
+  - [x] Remove old function definitions
+  - [x] Removed unused larkClient initialization
 
 #### KnowledgeService
 
