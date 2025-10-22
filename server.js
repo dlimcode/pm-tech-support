@@ -1,23 +1,41 @@
+// ===================================================================
+// PM-Next Lark Bot - Main Server
+// ===================================================================
+// This is the main entry point for the PM-Next Lark support bot.
+// All services have been extracted to /services directory for maintainability.
+// Test endpoints are in test-endpoints.js for cleaner organization.
+// ===================================================================
+
 require('dotenv').config();
+
+// === Core Dependencies ===
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+
+// === Internal Modules ===
 const messageLogger = require('./message-logger');
 const analyticsAPI = require('./analytics-api');
+
+// === Service Imports ===
 const LarkService = require('./services/lark_service');
 const KnowledgeService = require('./services/knowledge_service');
 const AIService = require('./services/ai_service');
 const LearningService = require('./services/learning_service');
 const TicketingService = require('./services/ticketing_service');
 
+// === Express App Setup ===
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Store processed event IDs to prevent duplicates
+// === Event Deduplication ===
+// Store processed event IDs to prevent duplicate processing
 const processedEvents = new Set();
 
-// Database functions for conversation persistence
+// === Database Functions for State Persistence ===
+// These functions manage conversation and ticket flow state in Supabase
+// (replacing previous in-memory Maps for serverless compatibility)
 async function getConversationHistory(chatId) {
   try {
     const { data, error } = await supabase
@@ -173,12 +191,7 @@ async function completeTicketFlow(chatId) {
   }
 }
 
-// Request queue management
-const requestQueue = [];
-const MAX_CONCURRENT_REQUESTS = 3;
-let activeRequests = 0;
-
-// Performance analytics
+// === Performance Analytics Tracking ===
 const analytics = {
   totalRequests: 0,
   cacheHits: 0,
@@ -187,48 +200,22 @@ const analytics = {
   errorCount: 0
 };
 
-async function processRequestQueue() {
-  if (activeRequests >= MAX_CONCURRENT_REQUESTS || requestQueue.length === 0) {
-    return;
-  }
-  
-  const { resolve, reject, fn } = requestQueue.shift();
-  activeRequests++;
-  
-  try {
-    const result = await fn();
-    resolve(result);
-  } catch (error) {
-    reject(error);
-  } finally {
-    activeRequests--;
-    // Process next request in queue
-    setTimeout(processRequestQueue, 100);
-  }
-}
-
-function queueRequest(fn) {
-  return new Promise((resolve, reject) => {
-    requestQueue.push({ resolve, reject, fn });
-    processRequestQueue();
-  });
-}
-
-// Middleware
+// === Express Middleware ===
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Analytics API routes
+// === Analytics API ===
 app.use('/api/analytics', analyticsAPI);
 
+// === Service Initialization ===
 // Initialize Lark service
 const larkService = new LarkService(
   process.env.LARK_APP_ID,
   process.env.LARK_APP_SECRET
 );
 
-// Validate environment variables first
+// Validate required environment variables
 console.log('🔧 Environment variable check:');
 console.log('   - NODE_ENV:', process.env.NODE_ENV);
 console.log('   - VERCEL:', process.env.VERCEL);
@@ -272,6 +259,21 @@ const ticketingService = new TicketingService(supabase, larkService, {
   completeTicketFlow,
   getTicketFlowState
 });
+
+// === Test and Debug Endpoints ===
+// Load test endpoints (extracted to separate file for cleaner codebase)
+const createTestRouter = require('./test-endpoints');
+const testRouter = createTestRouter({
+  larkService,
+  ticketingService,
+  learningService,
+  aiService,
+  knowledgeService,
+  supabase
+});
+app.use(testRouter);
+
+// === Core Routes ===
 
 // Handle Lark events
 app.post('/lark/events', async (req, res) => {
@@ -492,7 +494,6 @@ async function handleMessage(event) {
         checkTicketConfirmation: ticketingService.checkTicketConfirmation.bind(ticketingService),
         categorizeIssue: ticketingService.categorizeIssue.bind(ticketingService),
         shouldEscalateToTicket: ticketingService.shouldEscalateToTicket.bind(ticketingService),
-        trackRequest,
         analytics
       });
       const totalProcessingTime = Date.now() - responseStartTime;
@@ -544,6 +545,8 @@ async function handleMessage(event) {
     console.error('❌ Error handling message:', error);
   }
 }
+
+// === Health & Diagnostic Endpoints ===
 
 // Environment check endpoint
 app.get('/env-check', (req, res) => {
@@ -656,30 +659,7 @@ app.get('/check-kb-entries', async (req, res) => {
 });
 
 
-
-// Test user info endpoint for debugging
-app.get('/test-user/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    console.log('🧪 Testing user info fetch for:', userId);
-    
-    const userInfo = await larkService.getUserInfo(userId);
-    
-    res.json({
-      success: !!userInfo,
-      userInfo: userInfo,
-      userId: userId,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      userId: req.params.userId,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
+// === Production Monitoring Endpoints ===
 
 // Analytics endpoint
 app.get('/analytics', (req, res) => {
@@ -690,22 +670,20 @@ app.get('/analytics', (req, res) => {
     
   res.json({
     totalRequests: analytics.totalRequests,
-    cacheHitRate: analytics.totalRequests > 0 ? 
+    cacheHitRate: analytics.totalRequests > 0 ?
       (analytics.cacheHits / analytics.totalRequests * 100).toFixed(1) + '%' : '0%',
     averageResponseTime: analytics.averageResponseTime.toFixed(0) + 'ms',
     errorCount: analytics.errorCount,
-    errorRate: analytics.totalRequests > 0 ? 
+    errorRate: analytics.totalRequests > 0 ?
       (analytics.errorCount / analytics.totalRequests * 100).toFixed(1) + '%' : '0%',
-    activeRequests: activeRequests,
-    queueLength: requestQueue.length,
-    cacheSize: responseCache.size,
     topQuestions: topQuestions,
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
   });
 });
 
-// Support tickets endpoints
+// === Support Ticket Management Endpoints ===
+
 app.get('/tickets', async (req, res) => {
   try {
     const { status = 'open', limit = 50 } = req.query;
@@ -786,350 +764,7 @@ app.patch('/tickets/:ticketNumber', async (req, res) => {
   }
 });
 
-// Test notification endpoint
-app.post('/test-notification', async (req, res) => {
-  try {
-    const { chatId } = req.body;
-    
-    if (!chatId) {
-      return res.status(400).json({ error: 'chatId is required' });
-    }
-    
-    const testTicket = {
-      ticket_number: 'TEST-' + Date.now(),
-      user_name: 'Test User',
-      issue_category: 'test',
-      issue_title: 'Test Notification',
-      issue_description: 'This is a test notification to verify the support team notification system.',
-      urgency_level: 'medium',
-      steps_attempted: ['Testing notification system'],
-      browser_info: 'Test Browser',
-      device_info: 'Test Device',
-      created_at: new Date().toISOString()
-    };
-    
-    // Override the support group ID temporarily
-    const originalGroupId = process.env.LARK_SUPPORT_GROUP_ID;
-    process.env.LARK_SUPPORT_GROUP_ID = chatId;
-    
-    await notifySupportTeam(testTicket);
-    
-    // Restore original group ID
-    process.env.LARK_SUPPORT_GROUP_ID = originalGroupId;
-    
-    res.json({ 
-      success: true, 
-      message: 'Test notification sent',
-      chatId: chatId 
-    });
-  } catch (error) {
-    console.error('❌ Test notification error:', error);
-    res.status(500).json({ error: 'Failed to send test notification' });
-  }
-});
-
-// Test ticket creation endpoint
-app.post('/test-ticket', async (req, res) => {
-  try {
-    console.log('🧪 Testing ticket creation...');
-    
-    const testTicketData = {
-      user_id: 'test_user_' + Date.now(),
-      chat_id: 'test_chat_' + Date.now(),
-      user_name: 'Test User',
-      issue_category: 'general',
-      issue_title: 'Test Ticket Creation',
-      issue_description: 'This is a test ticket to verify the database connection and ticket creation process.',
-      steps_attempted: ['Testing system'],
-      browser_info: 'Test Browser',
-      device_info: 'Test Device',
-      urgency_level: 'medium',
-      status: 'open',
-      conversation_context: {
-        test: true,
-        timestamp: new Date().toISOString()
-      }
-    };
-    
-    const ticket = await createSupportTicket(testTicketData);
-    
-    if (ticket) {
-      res.json({ 
-        success: true, 
-        message: 'Test ticket created successfully',
-        ticket: {
-          ticket_number: ticket.ticket_number,
-          id: ticket.id,
-          created_at: ticket.created_at
-        }
-      });
-    } else {
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to create test ticket',
-        message: 'Check server logs for detailed error information'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Test ticket creation error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Exception during test ticket creation',
-      message: error.message 
-    });
-  }
-});
-
-// Test solution processing endpoint
-app.post('/test-solution-processing', async (req, res) => {
-  try {
-    console.log('🧪 Testing solution processing...');
-    
-    const { chatId, solutionMessage, createTestTicket = true } = req.body;
-    
-    if (!solutionMessage) {
-      return res.status(400).json({ 
-        error: 'solutionMessage is required' 
-      });
-    }
-    
-    let testChatId = chatId || 'test_chat_' + Date.now();
-    let testTicketNumber = null;
-    
-    // Create a test ticket if requested
-    if (createTestTicket) {
-      const testTicketData = {
-        user_id: 'test_user_solution_' + Date.now(),
-        chat_id: testChatId,
-        user_name: 'Test User - Solution Processing',
-        issue_category: 'authentication',
-        issue_title: 'Test login issue for solution processing',
-        issue_description: 'This is a test ticket to verify solution processing works correctly.',
-        steps_attempted: ['Tried different browser', 'Cleared cache'],
-        browser_info: 'Chrome',
-        device_info: 'MacBook',
-        urgency_level: 'medium',
-        status: 'open',
-        conversation_context: {
-          test: true,
-          purpose: 'solution_processing_test'
-        }
-      };
-      
-      const ticket = await createSupportTicket(testTicketData);
-      if (!ticket) {
-        return res.status(500).json({ 
-          error: 'Failed to create test ticket for solution processing test' 
-        });
-      }
-      
-      testTicketNumber = ticket.ticket_number;
-      console.log('✅ Test ticket created:', testTicketNumber);
-    }
-    
-    // Create a mock event that simulates a reply
-    const mockEvent = {
-      message: {
-        chat_id: testChatId,
-        parent_id: 'mock_parent_id',
-        content: JSON.stringify({ text: solutionMessage })
-      }
-    };
-    
-    // Test solution processing
-    console.log('🔍 Testing solution processing with message:', solutionMessage.substring(0, 100) + '...');
-
-    const result = await learningService.processSupportSolution(
-      solutionMessage,
-      testChatId,
-      { id: 'test_sender_id' },
-      mockEvent
-    );
-    
-    // Clean up test ticket if we created one
-    if (testTicketNumber) {
-      try {
-        await supabase
-          .schema('support')
-          .from('support_tickets')
-          .delete()
-          .eq('ticket_number', testTicketNumber);
-        console.log('🧹 Test ticket cleaned up');
-      } catch (cleanupError) {
-        console.log('⚠️ Failed to cleanup test ticket:', cleanupError.message);
-      }
-    }
-    
-    res.json({
-      success: true,
-      message: 'Solution processing test completed',
-      results: {
-        solutionProcessed: result,
-        testTicketCreated: createTestTicket,
-        testTicketNumber: testTicketNumber,
-        testChatId: testChatId,
-        messageLength: solutionMessage.length
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Test solution processing error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Test failed',
-      message: error.message 
-    });
-  }
-});
-
-// Knowledge Base Update Endpoints
-
-// Manually trigger knowledge base update from ticket solution
-app.post('/update-knowledge-base', async (req, res) => {
-  try {
-    const { ticketNumber, solution, forceUpdate = false } = req.body;
-    
-    if (!ticketNumber || !solution) {
-      return res.status(400).json({ 
-        error: 'ticketNumber and solution are required' 
-      });
-    }
-    
-    console.log('🔧 Manual knowledge base update requested:', ticketNumber);
-    
-    // Check if solution looks valid
-    if (!forceUpdate && !isSupportSolution(solution)) {
-      return res.status(400).json({ 
-        error: 'Solution does not appear to contain resolution information. Use forceUpdate=true to override.' 
-      });
-    }
-    
-    // Extract Q&A pair
-    const qaPair = await aiService.extractQAPair(ticketNumber, solution);
-    if (!qaPair) {
-      return res.status(400).json({ 
-        error: 'Could not extract Q&A pair from ticket and solution' 
-      });
-    }
-    
-    // Update knowledge base (database-first approach)
-    const success = await knowledgeService.addEntry({...qaPair, ticketNumber});
-    if (!success) {
-      return res.status(500).json({
-        error: 'Failed to update knowledge base'
-      });
-    }
-    
-    // Update ticket status
-    await supabase
-      .schema('support')
-      .from('support_tickets')
-      .update({ 
-        status: 'resolved',
-        resolved_at: new Date().toISOString(),
-        resolution_notes: solution
-      })
-      .eq('ticket_number', ticketNumber);
-    
-    res.json({
-      success: true,
-      message: 'Knowledge base updated successfully',
-      qaPair: qaPair
-    });
-    
-  } catch (error) {
-    console.error('❌ Manual knowledge base update error:', error);
-    res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message 
-    });
-  }
-});
-
-// Test knowledge base update with sample data
-app.post('/test-knowledge-update', async (req, res) => {
-  try {
-    console.log('🧪 Testing knowledge base update...');
-    
-    const testSolution = `Solution: The user needs to clear their browser cache and cookies.
-
-Steps to fix:
-1. Go to browser settings
-2. Clear browsing data
-3. Select "Cookies and other site data" and "Cached images and files"
-4. Click "Clear data"
-5. Refresh the page and try again
-
-This resolves the login issue in most cases.`;
-    
-    const mockTicket = {
-      ticket_number: 'TEST-' + Date.now(),
-      issue_title: 'Cannot login to PM-Next',
-      issue_description: 'User reports login page keeps loading but never completes',
-      issue_category: 'authentication',
-      steps_attempted: ['Tried different browser', 'Restarted computer']
-    };
-    
-    // Temporarily insert mock ticket
-    const { data: insertedTicket } = await supabase
-      .schema('support')
-      .from('support_tickets')
-      .insert([{
-        ticket_number: mockTicket.ticket_number,
-        user_id: 'test_user',
-        chat_id: 'test_chat',
-        user_name: 'Test User',
-        issue_category: mockTicket.issue_category,
-        issue_title: mockTicket.issue_title,
-        issue_description: mockTicket.issue_description,
-        steps_attempted: mockTicket.steps_attempted,
-        urgency_level: 'low',
-        status: 'open'
-      }])
-      .select()
-      .single();
-    
-    if (!insertedTicket) {
-      return res.status(500).json({ error: 'Failed to create test ticket' });
-    }
-    
-    // Test the knowledge base update
-    const qaPair = await aiService.extractQAPair(mockTicket.ticket_number, testSolution);
-    if (!qaPair) {
-      return res.status(500).json({ error: 'Failed to extract Q&A pair' });
-    }
-
-    const success = await knowledgeService.addEntry(qaPair);
-
-    // Clean up test ticket
-    await supabase
-      .schema('support')
-      .from('support_tickets')
-      .delete()
-      .eq('ticket_number', mockTicket.ticket_number);
-    
-    if (success) {
-      res.json({
-        success: true,
-        message: 'Knowledge base test update successful',
-        testData: {
-          ticket: mockTicket,
-          solution: testSolution,
-          extractedQA: qaPair
-        }
-      });
-    } else {
-      res.status(500).json({ error: 'Failed to update knowledge base' });
-    }
-    
-  } catch (error) {
-    console.error('❌ Test knowledge base update error:', error);
-    res.status(500).json({ 
-      error: 'Test failed',
-      message: error.message 
-    });
-  }
-});
+// === Knowledge Base Management Endpoints ===
 
 // Get knowledge base statistics
 app.get('/knowledge-stats', async (req, res) => {
@@ -1212,6 +847,8 @@ app.get('/current-knowledge-base', (req, res) => {
   }
 });
 
+// === Server Initialization ===
+
 // Initialize knowledge base for serverless environment
 async function initializeForServerless() {
   console.log('🚀 Serverless environment detected - initializing for Vercel');
@@ -1251,20 +888,3 @@ if (!process.env.VERCEL && !process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCT
 
 // Export the app for Vercel
 module.exports = app;
-
-function trackRequest(message, responseTime, fromCache = false) {
-  analytics.totalRequests++;
-  if (fromCache) analytics.cacheHits++;
-  
-  // Update average response time
-  analytics.averageResponseTime = 
-    (analytics.averageResponseTime * (analytics.totalRequests - 1) + responseTime) / analytics.totalRequests;
-  
-  // Track common questions
-  const questionKey = message.toLowerCase().substring(0, 50);
-  analytics.commonQuestions.set(questionKey, 
-    (analytics.commonQuestions.get(questionKey) || 0) + 1);
-  
-  console.log(`📈 Analytics: ${analytics.totalRequests} requests, ${analytics.cacheHits} cache hits (${(analytics.cacheHits/analytics.totalRequests*100).toFixed(1)}%), avg ${analytics.averageResponseTime.toFixed(0)}ms`);
-}
-
