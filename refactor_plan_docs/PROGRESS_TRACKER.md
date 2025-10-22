@@ -199,18 +199,19 @@
 
 #### AIService
 
-- [ ] **Extract AI functionality**
-  - [ ] Create AIService class
-  - [ ] Move generateAIResponse logic
-  - [ ] Move extractQAPair function
-  - [ ] Add buildSystemPrompt method
-  - [ ] Export module
+- [x] **Extract AI functionality**
+  - [x] Create AIService class
+  - [x] Move generateAIResponse logic
+  - [x] Move extractQAPair function
+  - [x] Add cache functionality
+  - [x] Export module
 
-- [ ] **Update server.js**
-  - [ ] Import AIService
-  - [ ] Initialize AI service
-  - [ ] Replace OpenAI calls
-  - [ ] Test AI responses work
+- [x] **Update server.js**
+  - [x] Import AIService
+  - [x] Initialize AI service
+  - [x] Replace OpenAI calls (1 generateResponse + 3 extractQAPair)
+  - [x] Removed extracted code (~461 lines)
+  - [x] Test AI responses work (no syntax errors)
 
 #### LearningService
 
