@@ -149,17 +149,17 @@
 
 ### Setup
 
-- [ ] **Create services directory**
-  - [ ] mkdir services
-  - [ ] Verify directory exists
-  - [ ] Add to git
+- [x] **Create services directory**
+  - [x] mkdir services
+  - [x] Verify directory exists
+  - [x] Add to git
 
-- [ ] **Create service files**
-  - [ ] touch services/lark_service.js
-  - [ ] touch services/ai_service.js
-  - [ ] touch services/ticketing_service.js
-  - [ ] touch services/learning_service.js
-  - [ ] touch services/knowledge_service.js
+- [x] **Create service files**
+  - [x] touch services/lark_service.js
+  - [x] touch services/ai_service.js
+  - [x] touch services/ticketing_service.js
+  - [x] touch services/learning_service.js
+  - [x] touch services/knowledge_service.js
 
 ### Service Extraction - Week 3
 
