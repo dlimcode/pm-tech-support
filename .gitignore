@@ -141,3 +141,6 @@ firebase-debug.log
 # Temporary files created by webpack
 *.hot-update.js
 *.hot-update.json
+
+# MCP configuration (contains sensitive API keys)
+.mcp.json
