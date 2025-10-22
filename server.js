@@ -67,6 +67,109 @@ async function addToConversation(chatId, userId, userName, message) {
   }
 }
 
+// Ticket flow state management functions
+async function startTicketFlow(chatId, userId, category, originalMessage) {
+  try {
+    const { error } = await supabase
+      .from('active_ticket_flows')
+      .insert({
+        chat_id: chatId,
+        user_id: userId,
+        current_step: 'title',
+        collected_data: {
+          category: category,
+          originalMessage: originalMessage
+        }
+      });
+
+    if (error) {
+      console.error('❌ Error starting ticket flow:', error);
+      return false;
+    }
+
+    console.log('✅ Ticket flow started for chat:', chatId);
+    return true;
+  } catch (error) {
+    console.error('❌ Exception in startTicketFlow:', error);
+    return false;
+  }
+}
+
+async function getTicketFlowState(chatId) {
+  try {
+    const { data, error } = await supabase
+      .from('active_ticket_flows')
+      .select('*')
+      .eq('chat_id', chatId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    // Transform database format to match existing code structure
+    return {
+      step: data.current_step,
+      category: data.collected_data.category,
+      originalMessage: data.collected_data.originalMessage,
+      senderId: data.user_id,
+      data: data.collected_data.data || {}
+    };
+  } catch (error) {
+    console.error('❌ Error fetching ticket flow state:', error);
+    return null;
+  }
+}
+
+async function updateTicketFlowState(chatId, newStep, newData) {
+  try {
+    const currentState = await getTicketFlowState(chatId);
+    if (!currentState) {
+      console.error('❌ No ticket flow found for chat:', chatId);
+      return false;
+    }
+
+    // Merge new data with existing data
+    const mergedData = { ...currentState.data, ...newData };
+
+    const { error } = await supabase
+      .from('active_ticket_flows')
+      .update({
+        current_step: newStep,
+        collected_data: {
+          category: currentState.category,
+          originalMessage: currentState.originalMessage,
+          data: mergedData
+        },
+        last_update: new Date().toISOString()
+      })
+      .eq('chat_id', chatId);
+
+    if (error) {
+      console.error('❌ Error updating ticket flow:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('❌ Exception in updateTicketFlowState:', error);
+    return false;
+  }
+}
+
+async function completeTicketFlow(chatId) {
+  try {
+    await supabase
+      .from('active_ticket_flows')
+      .delete()
+      .eq('chat_id', chatId);
+
+    console.log('✅ Ticket flow completed for chat:', chatId);
+  } catch (error) {
+    console.error('❌ Error completing ticket flow:', error);
+  }
+}
+
 // Response cache for common questions
 const responseCache = new Map();
 const CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
@@ -84,9 +187,6 @@ const analytics = {
   commonQuestions: new Map(),
   errorCount: 0
 };
-
-// Support ticket system
-const ticketCollectionState = new Map(); // Track users in ticket creation flow
 
 // Knowledge base auto-update system - FLEXIBLE APPROACH
 const SOLUTION_KEYWORDS = [
@@ -675,8 +775,9 @@ async function handleMessage(event) {
     console.log('📏 Message length:', userMessage.length);
 
     // Check if user is in ticket creation flow
-    const isInTicketFlow = ticketCollectionState.has(chat_id);
-    
+    const ticketFlowState = await getTicketFlowState(chat_id);
+    const isInTicketFlow = ticketFlowState !== null;
+
     if (!userMessage || (userMessage.length < 2 && !isInTicketFlow)) {
       console.log('⏭️  Skipping: Empty or too short message');
       return; // Don't respond to empty messages
@@ -793,9 +894,9 @@ async function generateAIResponse(userMessage, chatId, senderId = null) {
     // Get conversation context from database
     const context = await getConversationHistory(chatId);
     console.log('📚 Current context length:', context.length);
-    
+
     // Check if user is in ticket creation flow
-    const ticketState = ticketCollectionState.get(chatId);
+    const ticketState = await getTicketFlowState(chatId);
     if (ticketState) {
       return await handleTicketCreationFlow(chatId, userMessage, ticketState, senderId);
     }
@@ -2304,16 +2405,10 @@ function shouldEscalateToTicket(context, userMessage) {
 
 async function startTicketCreation(chatId, userMessage, category, senderId = null) {
   console.log('🎫 Starting ticket creation for chat:', chatId);
-  
-  // Initialize ticket collection state with user information
-  ticketCollectionState.set(chatId, {
-    step: 'title',
-    category: category,
-    originalMessage: userMessage,
-    senderId: senderId,
-    data: {}
-  });
-  
+
+  // Initialize ticket flow in database
+  await startTicketFlow(chatId, senderId || 'unknown', category, userMessage);
+
   return `I'll help you create a support ticket to get personalized assistance. Let me collect some details:
 
 **Step 1 of 3: Issue Title**
@@ -2326,34 +2421,32 @@ async function handleTicketCreationFlow(chatId, userMessage, ticketState, sender
   
   switch (step) {
     case 'title':
-      data.title = userMessage.trim();
-      ticketState.step = 'description';
-      ticketCollectionState.set(chatId, ticketState);
-      
+      // Update flow state with title
+      await updateTicketFlowState(chatId, 'description', { title: userMessage.trim() });
+
       return `**Step 2 of 3: Detailed Description**
 Please describe the issue in detail. What exactly happens when you try to perform the action?`;
 
     case 'description':
-      data.description = userMessage.trim();
-      ticketState.step = 'steps';
-      ticketCollectionState.set(chatId, ticketState);
-      
+      // Update flow state with description
+      await updateTicketFlowState(chatId, 'steps', { description: userMessage.trim() });
+
       return `**Step 3 of 3: Steps Attempted**
 What steps have you already tried to resolve this issue? (e.g., "Refreshed page, cleared cache, tried different browser")`;
 
     case 'steps':
       data.stepsAttempted = userMessage.trim().split(',').map(s => s.trim());
-      
+
       // Set default values for removed steps
       data.browser = 'Not specified';
       data.device = 'Not specified';
       data.urgency = 'medium'; // Default urgency level
-      
+
       // Create the ticket immediately after step 3
       const ticket = await createTicketFromData(chatId, data, category, ticketState.originalMessage, actualSenderId);
-      
-      // Clear the collection state
-      ticketCollectionState.delete(chatId);
+
+      // Clear the flow state from database
+      await completeTicketFlow(chatId);
       
       if (ticket) {
         console.log('🎯 Ticket created successfully, notifying support team...');
@@ -2405,7 +2498,7 @@ I apologize for the inconvenience. Our technical team has been notified of this 
 
     default:
       // Reset if in unknown state
-      ticketCollectionState.delete(chatId);
+      await completeTicketFlow(chatId);
       return `I encountered an error in the ticket creation process. Let me start over. Please describe your issue and I'll help you create a support ticket.`;
   }
 }
