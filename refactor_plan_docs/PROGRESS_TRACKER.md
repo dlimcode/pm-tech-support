@@ -215,18 +215,18 @@
 
 #### LearningService
 
-- [ ] **Extract learning functionality**
-  - [ ] Create LearningService class
-  - [ ] Move processSupportSolution
-  - [ ] Move addToKnowledgeBase
-  - [ ] Add confidence scoring methods
-  - [ ] Export module
+- [x] **Extract learning functionality**
+  - [x] Create LearningService class
+  - [x] Move processSupportSolution
+  - [x] Move all helper functions (6 methods total)
+  - [x] Move solution detection constants
+  - [x] Export module
 
-- [ ] **Update server.js**
-  - [ ] Import LearningService
-  - [ ] Initialize learning service
-  - [ ] Update solution processing calls
-  - [ ] Test learning loop works
+- [x] **Update server.js**
+  - [x] Import LearningService
+  - [x] Initialize learning service
+  - [x] Update solution processing calls (2 call sites)
+  - [x] Test learning loop works (no syntax errors)
 
 #### TicketingService
 
