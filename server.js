@@ -13,6 +13,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+const OpenAI = require('openai');
 
 // === Internal Modules ===
 const messageLogger = require('./message-logger');
@@ -211,8 +212,11 @@ const supabase = createClient(
   }
 );
 
-// Initialize Knowledge service
-const knowledgeService = new KnowledgeService(supabase);
+// Initialize OpenAI client (shared for embedding generation)
+const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Initialize Knowledge service (with OpenAI for hybrid search)
+const knowledgeService = new KnowledgeService(supabase, null, openaiClient);
 
 // Initialize AI service
 const aiService = new AIService(process.env.OPENAI_API_KEY, supabase, knowledgeService);

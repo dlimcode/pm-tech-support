@@ -1,20 +1,27 @@
 // KnowledgeService - Handles all knowledge base operations
 // Extracted from server.js as part of Phase 1 refactoring
+// Phase 2: Added hybrid search methods (searchForUsers, searchForAI, recordFeedback)
 
 const fs = require('fs');
 const path = require('path');
 
 class KnowledgeService {
-  constructor(supabaseClient, knowledgeBasePath = null) {
+  constructor(supabaseClient, knowledgeBasePath = null, openaiClient = null) {
     if (!supabaseClient) {
       throw new Error('KnowledgeService requires a Supabase client');
     }
 
     this.supabase = supabaseClient;
-    this.knowledgeBasePath = knowledgeBasePath || path.join(__dirname, '..', 'knowledge-base.md');
+    this.openai = openaiClient; // Optional OpenAI client for embedding generation
+    this.knowledgeBasePath = knowledgeBasePath || path.join(__dirname, '..', 'pm-next-documentation.md');
     this.knowledgeBaseTable = 'knowledge_base';
+    this.knowledgeBaseSchema = 'support';
     this.knowledgeBaseContent = '';
     this.initialized = false;
+
+    // Embedding configuration
+    this.embeddingModel = 'text-embedding-3-small';
+    this.embeddingDimensions = 1536;
 
     // Initial load of static knowledge base
     this._loadStaticKnowledgeBase();
@@ -22,7 +29,7 @@ class KnowledgeService {
     // Watch for file changes in development
     if (process.env.NODE_ENV !== 'production') {
       fs.watchFile(this.knowledgeBasePath, (curr, prev) => {
-        console.log('=› Knowledge base file changed, reloading...');
+        console.log('=ÔøΩ Knowledge base file changed, reloading...');
         this._loadStaticKnowledgeBase();
       });
     }
@@ -36,7 +43,7 @@ class KnowledgeService {
   _loadStaticKnowledgeBase() {
     try {
       this.knowledgeBaseContent = fs.readFileSync(this.knowledgeBasePath, 'utf8');
-      console.log('=⁄ Knowledge base loaded/reloaded');
+      console.log('=ÔøΩ Knowledge base loaded/reloaded');
       return this.knowledgeBaseContent;
     } catch (error) {
       console.error('L Error loading knowledge base:', error);
@@ -56,9 +63,9 @@ class KnowledgeService {
         .select('id')
         .limit(1);
 
-      console.log('=⁄ Knowledge base table check:', error ? 'Using file fallback' : 'Database ready');
+      console.log('=ÔøΩ Knowledge base table check:', error ? 'Using file fallback' : 'Database ready');
     } catch (error) {
-      console.log('=⁄ Knowledge base: Using file-based fallback');
+      console.log('=ÔøΩ Knowledge base: Using file-based fallback');
     }
   }
 
@@ -91,11 +98,11 @@ class KnowledgeService {
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.log('† Database query failed, using static knowledge base only:', error.message);
-        console.log('= Error code:', error.code);
-        console.log('=' Environment:', process.env.VERCEL ? 'Vercel' : 'Local');
-        console.log('=' Supabase URL:', process.env.SUPABASE_URL ? 'Set (' + process.env.SUPABASE_URL.substring(0, 30) + '...)' : 'MISSING');
-        console.log('=' Supabase key:', process.env.SUPABASE_ANON_KEY ? 'Set (' + process.env.SUPABASE_ANON_KEY.substring(0, 20) + '...)' : 'MISSING');
+        console.log('ÔøΩ Database query failed, using static knowledge base only:', error.message);
+        console.log("   Error code:", error.code);
+        console.log("   Environment:", process.env.VERCEL ? "Vercel" : "Local");
+        console.log("   Supabase URL:", process.env.SUPABASE_URL ? "Set (" + process.env.SUPABASE_URL.substring(0, 30) + "...)" : "MISSING");
+        console.log("   Supabase key:", process.env.SUPABASE_ANON_KEY ? "Set (" + process.env.SUPABASE_ANON_KEY.substring(0, 20) + "...)" : "MISSING");
 
         // Check for common production issues
         if (!process.env.SUPABASE_URL) {
@@ -108,7 +115,7 @@ class KnowledgeService {
           console.log('= RLS permission issue - check Supabase RLS policies');
         }
         if (error.message.includes('relation') && error.message.includes('does not exist')) {
-          console.log('=ƒ Table does not exist - check schema and table name');
+          console.log('=ÔøΩ Table does not exist - check schema and table name');
         }
 
         return knowledgeBase;
@@ -136,7 +143,7 @@ class KnowledgeService {
           // Insert the database entries before the next section
           knowledgeBase = knowledgeBase.slice(0, insertIndex) + additionalQA + '\n' + knowledgeBase.slice(insertIndex);
 
-          console.log('=⁄ Knowledge base loaded: Static content + ' + data.length + ' dynamic entries from database');
+          console.log('=ÔøΩ Knowledge base loaded: Static content + ' + data.length + ' dynamic entries from database');
         } else {
           // If we can't find the questions section, append to the end
           let additionalQA = '\n\n## Additional Support Solutions\n';
@@ -148,10 +155,10 @@ class KnowledgeService {
           });
           knowledgeBase += additionalQA;
 
-          console.log('=⁄ Knowledge base loaded: Static content + ' + data.length + ' dynamic entries (appended)');
+          console.log('=ÔøΩ Knowledge base loaded: Static content + ' + data.length + ' dynamic entries (appended)');
         }
       } else {
-        console.log('=⁄ Knowledge base loaded: Static content only (no database entries)');
+        console.log('=ÔøΩ Knowledge base loaded: Static content only (no database entries)');
       }
 
       this.knowledgeBaseContent = knowledgeBase;
@@ -162,7 +169,7 @@ class KnowledgeService {
       console.error('L Error loading from database, using static knowledge base only:', error);
       // Fallback to just the static file content
       const staticKnowledgeBase = this._loadStaticKnowledgeBase();
-      console.log('=⁄ Knowledge base loaded: Static content only (database error fallback)');
+      console.log('=ÔøΩ Knowledge base loaded: Static content only (database error fallback)');
       return staticKnowledgeBase;
     }
   }
@@ -187,17 +194,17 @@ class KnowledgeService {
         .select();
 
       if (error) {
-        console.log('† Database insert failed:', error.message);
-        console.log('= Error details:', JSON.stringify(error, null, 2));
-        console.log('=' Environment check:');
+        console.log('ÔøΩ Database insert failed:', error.message);
+        console.log("   Error details:", JSON.stringify(error, null, 2));
+        console.log("   Environment check:");
         console.log('   - SUPABASE_URL:', process.env.SUPABASE_URL ? 'Set' : 'Missing');
         console.log('   - SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? 'Set' : 'Missing');
         console.log('   - VERCEL environment:', process.env.VERCEL ? 'Yes' : 'No');
 
         // Check if it's a permission issue
         if (error.code === '42501' || error.message.includes('permission denied')) {
-          console.log('= Permission denied - RLS policies may need to be configured');
-          console.log('=° Check fix-rls-policies.sql for SQL commands to fix this');
+          console.log("   Permission denied - RLS policies may need to be configured");
+          console.log('=ÔøΩ Check fix-rls-policies.sql for SQL commands to fix this');
         }
 
         // Don't fallback to file updates in production (Vercel)
@@ -207,7 +214,7 @@ class KnowledgeService {
         }
 
         // Fallback to file update for local development only
-        console.log('= Falling back to file-based knowledge base update...');
+        console.log("   Falling back to file-based knowledge base update...");
         return await this._updateKnowledgeBaseFile(qaPair);
       }
 
@@ -293,7 +300,7 @@ class KnowledgeService {
 
       // Write updated knowledge base
       fs.writeFileSync(this.knowledgeBasePath, knowledgeBase);
-      console.log('=⁄ Knowledge base updated with new Q&A:', qaPair.question);
+      console.log('=ÔøΩ Knowledge base updated with new Q&A:', qaPair.question);
 
       // Reload the knowledge base in memory
       this._loadStaticKnowledgeBase();
@@ -332,6 +339,193 @@ class KnowledgeService {
    */
   async reload() {
     return await this.loadFromDatabase();
+  }
+
+  // ============================================================================
+  // PHASE 2: HYBRID SEARCH METHODS
+  // ============================================================================
+
+  /**
+   * Generate embedding for a query using OpenAI
+   * @param {string} text - Text to embed
+   * @returns {Promise<Array<number>>} Embedding vector
+   * @private
+   */
+  async _generateEmbedding(text) {
+    if (!this.openai) {
+      throw new Error('OpenAI client not configured. Cannot generate embeddings.');
+    }
+
+    try {
+      const response = await this.openai.embeddings.create({
+        model: this.embeddingModel,
+        input: text,
+        dimensions: this.embeddingDimensions
+      });
+
+      return response.data[0].embedding;
+    } catch (error) {
+      console.error('‚ùå Error generating embedding:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Search knowledge base for direct user responses (KB-first approach)
+   * High confidence matches return KB articles directly without AI
+   *
+   * @param {string} query - User's question
+   * @param {number} matchThreshold - Minimum similarity score (0-1), default 0.7
+   * @param {number} matchCount - Maximum results to return, default 3
+   * @returns {Promise<Array>} Array of matching KB entries with similarity scores
+   */
+  async searchForUsers(query, matchThreshold = 0.7, matchCount = 3) {
+    try {
+      // Generate query embedding
+      const queryEmbedding = await this._generateEmbedding(query);
+
+      // Call match_knowledge RPC function in support schema
+      const { data, error } = await this.supabase
+        .schema(this.knowledgeBaseSchema)
+        .rpc('match_knowledge', {
+          query_embedding: queryEmbedding,
+          match_threshold: matchThreshold,
+          match_count: matchCount
+        });
+
+      if (error) {
+        console.error('‚ùå Vector search error:', error);
+        return [];
+      }
+
+      if (!data || data.length === 0) {
+        console.log('üìä No KB matches found above threshold', matchThreshold);
+        return [];
+      }
+
+      console.log(`‚úÖ Found ${data.length} KB matches (${(data[0].similarity * 100).toFixed(1)}% top similarity)`);
+
+      // Format results for user display
+      return data.map(result => ({
+        id: result.id,
+        question: result.question,
+        answer: result.answer,
+        category: result.category,
+        similarity: result.similarity,
+        confidence: result.similarity >= 0.85 ? 'high' : result.similarity >= 0.7 ? 'medium' : 'low'
+      }));
+
+    } catch (error) {
+      console.error('‚ùå Error in searchForUsers:', error.message);
+      // Return empty array to allow fallback to AI
+      return [];
+    }
+  }
+
+  /**
+   * Search knowledge base for AI context injection
+   * Lower threshold, returns more results for AI to use as context
+   * Reduces token usage from ~1,200 tokens (full KB) to 150-300 tokens (relevant entries)
+   *
+   * @param {string} query - User's question
+   * @param {number} matchCount - Number of relevant entries to return, default 5
+   * @returns {Promise<Array>} Array of relevant KB entries for AI context
+   */
+  async searchForAI(query, matchCount = 5) {
+    try {
+      // Generate query embedding
+      const queryEmbedding = await this._generateEmbedding(query);
+
+      // Use lower threshold for AI context (more permissive)
+      const { data, error } = await this.supabase
+        .schema(this.knowledgeBaseSchema)
+        .rpc('match_knowledge', {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.5, // Lower threshold for context
+          match_count: matchCount
+        });
+
+      if (error) {
+        console.error('‚ùå Vector search error:', error);
+        return [];
+      }
+
+      if (!data || data.length === 0) {
+        console.log('üìä No KB context found for AI');
+        return [];
+      }
+
+      console.log(`‚úÖ Found ${data.length} KB entries for AI context`);
+
+      // Return formatted results for AI prompt injection
+      return data.map(result => ({
+        question: result.question,
+        answer: result.answer,
+        category: result.category,
+        similarity: result.similarity
+      }));
+
+    } catch (error) {
+      console.error('‚ùå Error in searchForAI:', error.message);
+      // Return empty array to allow AI to proceed without KB context
+      return [];
+    }
+  }
+
+  /**
+   * Record user feedback on KB entry usefulness
+   * Tracks helpful/not_helpful counts for continuous improvement
+   *
+   * @param {string} entryId - UUID of the KB entry
+   * @param {boolean} isHelpful - true for helpful (üëç), false for not helpful (üëé)
+   * @returns {Promise<boolean>} Success status
+   */
+  async recordFeedback(entryId, isHelpful) {
+    try {
+      const columnToUpdate = isHelpful ? 'helpful_count' : 'not_helpful_count';
+
+      // Increment the appropriate counter
+      const { error } = await this.supabase
+        .schema(this.knowledgeBaseSchema)
+        .rpc('increment', {
+          row_id: entryId,
+          column_name: columnToUpdate
+        });
+
+      if (error) {
+        // If RPC doesn't exist, try direct SQL update
+        const { data: currentEntry, error: fetchError } = await this.supabase
+          .schema(this.knowledgeBaseSchema)
+          .from(this.knowledgeBaseTable)
+          .select(columnToUpdate)
+          .eq('id', entryId)
+          .single();
+
+        if (fetchError) {
+          console.error('‚ùå Error fetching entry for feedback:', fetchError);
+          return false;
+        }
+
+        const newCount = (currentEntry[columnToUpdate] || 0) + 1;
+        const { error: updateError } = await this.supabase
+          .schema(this.knowledgeBaseSchema)
+          .from(this.knowledgeBaseTable)
+          .update({ [columnToUpdate]: newCount })
+          .eq('id', entryId);
+
+        if (updateError) {
+          console.error('‚ùå Error updating feedback:', updateError);
+          return false;
+        }
+      }
+
+      console.log(`üëç Feedback recorded: ${isHelpful ? 'helpful' : 'not helpful'} for entry ${entryId}`);
+      return true;
+
+    } catch (error) {
+      console.error('‚ùå Error in recordFeedback:', error.message);
+      return false;
+    }
   }
 }
 
