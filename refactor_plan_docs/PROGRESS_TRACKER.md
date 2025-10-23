@@ -317,59 +317,111 @@
   - [x] Function created successfully ✅
   - [x] Returns id, question, answer, category, similarity
 
-### Migration Script
+### Database-First KB Setup (REVISED APPROACH)
 
-- [ ] **Create migration script**
-  - [ ] Create scripts/migrate-knowledge-base.js
-  - [ ] Implement parseKnowledgeBase()
-  - [ ] Add embedding generation
-  - [ ] Add database insertion
+- [ ] **Separate documentation concerns**
+  - [ ] Rename knowledge-base.md → pm-next-documentation.md
+  - [ ] Document kept as feature documentation reference
+  - [ ] Extract 8 existing Q&A entries for manual entry
+
+- [ ] **Enhance database schema**
+  - [ ] Add keywords column (TEXT[] for search)
+  - [ ] Add difficulty column (easy/medium/hard)
+  - [ ] Add helpful_count and not_helpful_count columns
+  - [ ] Add source column (manual/learning-loop/migration)
+  - [ ] Add search_vector column (tsvector for keyword search)
+  - [ ] Create indexes (keywords gin, search_vector gin)
+
+- [ ] **Manually insert initial Q&A entries**
+  - [ ] Insert 8 existing Q&A entries from documentation
+  - [ ] Add 10-15 additional common questions
+  - [ ] Total target: 20-25 entries with proper structure
+  - [ ] Include categories, keywords, difficulty for each
+
+- [ ] **Create embedding generation script**
+  - [ ] Create scripts/ directory if needed
+  - [ ] Create scripts/generate-kb-embeddings.js
+  - [ ] Read entries from database (where embedding IS NULL)
+  - [ ] Generate embeddings using OpenAI API
+  - [ ] Update database with embeddings
   - [ ] Add rate limiting (350ms between calls)
+  - [ ] Add progress logging and error handling
 
-- [ ] **Test on small sample**
-  - [ ] Parse first 5 Q&A pairs
-  - [ ] Generate embeddings
-  - [ ] Insert into database
-  - [ ] Verify data correct
-
-- [ ] **Full migration**
-  - [ ] Run: `node scripts/migrate-knowledge-base.js`
-  - [ ] Monitor for errors
-  - [ ] Verify all entries migrated
-  - [ ] Count rows matches expected
+- [ ] **Test embedding generation**
+  - [ ] Run script on first 5 entries
+  - [ ] Verify embeddings are vector(1536)
+  - [ ] Check for errors or failures
+  - [ ] Run full generation for all entries
 
 - [ ] **Verification**
-  - [ ] Check embedding column populated
-  - [ ] Test similarity search
+  - [ ] Check all entries have embeddings (embedding IS NOT NULL)
+  - [ ] Test similarity search with match_knowledge()
   - [ ] Verify relevant results returned
+  - [ ] Test keyword search using search_vector
 
-### Update Knowledge Service
+- [ ] **Optional: Create export script**
+  - [ ] Create scripts/export-kb-to-yaml.js
+  - [ ] Export database entries to YAML format
+  - [ ] Group by category
+  - [ ] Test export/commit to git for backup
 
-- [ ] **Implement vector search**
-  - [ ] Update search() method
+### Hybrid Knowledge Service
+
+- [ ] **Implement searchForAI() method**
   - [ ] Generate query embedding
   - [ ] Call match_knowledge RPC
-  - [ ] Return top 5 results
+  - [ ] Return top 5 results for AI context
   - [ ] Add error handling
 
-- [ ] **Update add() method**
-  - [ ] Generate embedding for new entries
-  - [ ] Insert with embedding
-  - [ ] Set confidence_score to 0.5
-  - [ ] Test insertion works
+- [ ] **Implement searchForUsers() method (NEW)**
+  - [ ] Try keyword match first (fast path)
+  - [ ] Fall back to vector search
+  - [ ] Return formatted KB articles with confidence scores
+  - [ ] Support pagination (limit parameter)
 
-### Update AI Service
+- [ ] **Add recordFeedback() method (NEW)**
+  - [ ] Update helpful_count or not_helpful_count
+  - [ ] Track which KB entries are useful
+  - [ ] Log for analytics
 
-- [ ] **Remove static KB loading**
-  - [ ] Delete PM_NEXT_KNOWLEDGE variable
-  - [ ] Delete loadKnowledgeBase() function
-  - [ ] Remove file read operations
+- [ ] **Keep getContent() fallback**
+  - [ ] Maintain static markdown loading
+  - [ ] Use if database unavailable
 
-- [ ] **Use vector search**
-  - [ ] Call knowledge.search(userMessage, 5)
-  - [ ] Format results for prompt
-  - [ ] Inject into system message
-  - [ ] Test AI responses use relevant KB
+### Update AI Service (Hybrid Flow)
+
+- [ ] **Add KB-first logic**
+  - [ ] Search KB with high confidence threshold (>0.85)
+  - [ ] Return KB article directly if confident match
+  - [ ] Skip AI call for 60-70% of questions
+
+- [ ] **Update AI context (when needed)**
+  - [ ] Use searchForAI() to get relevant 3-5 entries only
+  - [ ] Replace full KB injection (1,200 tokens → 150-300 tokens)
+  - [ ] Format as "relevant knowledge" in system prompt
+  - [ ] Test AI responses still accurate
+
+- [ ] **Add feedback detection**
+  - [ ] Detect 👍/👎 or "helpful"/"not helpful"
+  - [ ] Call recordFeedback() when detected
+  - [ ] Thank user or offer alternative help
+
+### Add Feedback Tracking (Integrated with Schema Enhancement)
+
+- [ ] **Database columns** (Already added in schema enhancement step above)
+  - [ ] helpful_count INT DEFAULT 0
+  - [ ] not_helpful_count INT DEFAULT 0
+
+- [ ] **Implement feedback detection**
+  - [ ] Pattern matching for positive feedback
+  - [ ] Pattern matching for negative feedback
+  - [ ] Update database on feedback received
+
+- [ ] **Test feedback loop**
+  - [ ] Send KB article
+  - [ ] User responds with 👍
+  - [ ] Verify count incremented
+  - [ ] Test negative feedback path
 
 ### Performance Testing
 
@@ -384,19 +436,34 @@
   - [ ] Target: 70-90% reduction
   - [ ] Monitor over 1 week
 
-### Phase 2 Completion Criteria
+### Phase 2 Completion Criteria (Hybrid System)
 
-- [ ] All KB entries migrated to database
-- [ ] All entries have embeddings
-- [ ] Vector search returns relevant results
-- [ ] Query time < 500ms
-- [ ] Static file removed/deprecated
-- [ ] OpenAI costs reduced
-- [ ] AI responses still accurate
+**Core Functionality**:
+- [ ] All KB entries migrated to database with embeddings
+- [ ] Vector search returns relevant results (tested)
+- [ ] Hybrid search working (KB-first, then AI fallback)
+- [ ] 60-70% of simple questions answered without AI call
+- [ ] Feedback tracking implemented (👍👎 detection)
+
+**Performance**:
+- [ ] KB search query time < 500ms
+- [ ] Token usage reduced 70-85% for simple questions
+- [ ] AI responses still accurate for complex questions
+
+**Architecture**:
+- [ ] Markdown file remains source of truth (git-tracked)
+- [ ] Database is search index (auto-synced)
+- [ ] Fallback to static KB if database fails
+- [ ] Learning loop can add to DB (review before promoting to .md)
+
+**Measurable Impact**:
+- [ ] Simple questions: <1s response time (was 3-5s)
+- [ ] OpenAI cost reduction: Target $2-3/month (was $6/month)
+- [ ] User satisfaction: Track via feedback counts
 
 **Phase 2 Completed**: [ ] Yes [ ] No
 **Completion Date**: ___________
-**Notes**: ___________
+**Notes**: Hybrid approach - eliminates AI dependency for 60-70% of questions
 
 ---
 

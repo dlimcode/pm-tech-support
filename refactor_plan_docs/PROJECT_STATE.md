@@ -9,10 +9,10 @@
 
 ```yaml
 # CURRENT STATE
-project_phase: "Phase 2 - KB Migration"
-phase_status: "IN PROGRESS"
+project_phase: "Phase 2 - Hybrid KB System"
+phase_status: "IN PROGRESS - Strategic Shift to Hybrid Approach"
 current_task_id: "P2.MIGRATION.1"
-current_task: "Create knowledge base migration script"
+current_task: "Create knowledge base migration script (hybrid approach)"
 
 # COMPLETION TRACKING
 overall_progress_percent: 40
@@ -63,7 +63,31 @@ production_health: "STABLE (with known bugs)"
 **Completion Status**: 100% Complete
 **Final Result**: server.js reduced from 3,091 → 858 lines (72% reduction)
 
-**Current Focus**: Moving to Phase 2 - KB Migration
+### Phase 2: Hybrid Knowledge Base System 🔄 IN PROGRESS
+
+**Objective**: Build hybrid KB system - reduce AI dependency by 60-70%
+
+**Strategic Approach**:
+- Vector DB for intelligent search
+- KB-first responses (no AI needed for simple questions)
+- AI as fallback for complex/uncertain cases
+- Feedback tracking for continuous improvement
+
+**Architecture**:
+```
+Layer 1: Markdown file (source of truth, git-tracked)
+Layer 2: Vector DB (search index, auto-synced)
+Layer 3: Hybrid service (KB-first → AI fallback)
+Layer 4: Feedback loop (track usefulness)
+```
+
+**Expected Impact**:
+- 60-70% questions answered without AI (<1s vs 3-5s)
+- 70-85% token cost reduction for simple questions
+- Better UX (instant answers for common questions)
+- Monthly cost: $6 → $2-3 (50%+ savings)
+
+**Current Focus**: Migration script + hybrid service implementation
 
 ---
 
@@ -71,27 +95,36 @@ production_health: "STABLE (with known bugs)"
 
 ### Immediate Next Task (P2.MIGRATION.1)
 
-**Task**: Create knowledge base migration script
-**Location**: scripts/migrate-knowledge-base.js (new file)
-**Files**: Create new migration script
-**Testing**: Run on small sample first, then full migration
-**Risk**: Medium (depends on knowledge-base.md format, requires OpenAI API)
+**Task**: Database-first KB setup with embedding generation
+**Location**: Database entries + scripts/generate-kb-embeddings.js
+**Files**: Enhance DB schema, create embedding generation script
+**Testing**: Insert entries, generate embeddings, test vector search
+**Risk**: Low (direct DB operations, simpler than parsing)
+
+**Key Decisions** (Database-First Architecture):
+- Database = primary source (scalable to 1000+ entries)
+- YAML export = git backup (weekly export for version control)
+- Manual entry for initial 20-25 Q&As (extracted from current documentation)
+- Generate embeddings for existing DB entries (no parsing needed)
+- pm-next-documentation.md = feature docs (separate from support KB)
 
 **Success Criteria**:
+- [ ] Rename knowledge-base.md → pm-next-documentation.md (separate concerns)
+- [ ] Add metadata columns to DB (keywords, difficulty, helpful_count, etc.)
+- [ ] Manually insert 20-25 Q&A entries with proper structure
 - [ ] Create scripts/ directory if needed
-- [ ] Create migrate-knowledge-base.js with parsing logic
-- [ ] Implement OpenAI embedding generation
-- [ ] Add rate limiting (350ms between API calls)
-- [ ] Test on first 5 Q&A pairs
-- [ ] Run full migration
-- [ ] Verify all entries have embeddings
-- [ ] Update PROGRESS_TRACKER.md
+- [ ] Create scripts/generate-kb-embeddings.js
+- [ ] Generate embeddings for all entries (350ms rate limit)
+- [ ] Verify all entries have valid embeddings
+- [ ] Test similarity search returns relevant results
+- [ ] (Optional) Create scripts/export-kb-to-yaml.js for backup
 
-### Next 3 Tasks After That
+### Next 4 Tasks After That
 
-1. **P2.SERVICE.1**: Update KnowledgeService to use vector search
-2. **P2.SERVICE.2**: Update AIService to remove static KB loading
-3. **P2.TEST.1**: Test vector search returns relevant results
+1. **P2.SERVICE.1**: Update KnowledgeService (add searchForUsers + searchForAI + recordFeedback methods)
+2. **P2.SERVICE.2**: Update AIService (hybrid flow: KB-first → AI fallback)
+3. **P2.EXPORT.1**: Create export-kb-to-yaml.js script (git backup capability)
+4. **P2.TEST.1**: End-to-end testing (verify 60-70% questions skip AI)
 
 ---
 

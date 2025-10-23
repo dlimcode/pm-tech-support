@@ -491,199 +491,206 @@ curl -X POST http://localhost:3001/lark/events -H "Content-Type: application/jso
 
 ---
 
-## Phase 2: Knowledge Base Migration (Week 5)
+## Phase 2: Hybrid Knowledge Base System (Week 5)
 
-**Objective**: Move from static file to dynamic vector search
+**Objective**: Build hybrid KB system - vector search for AI + self-service search for users
+**Strategic Shift**: Reduce AI dependency by 60-70% through direct KB access
+**Impact**: Faster responses, lower costs, better UX
 
-### Step 1: Add Embedding Column
+### Step 1: Database Setup ✅ COMPLETE
 
-```sql
--- Add to support.knowledge_base
-ALTER TABLE support.knowledge_base
-ADD COLUMN IF NOT EXISTS embedding vector(1536);
+**Already completed:**
+- ✅ Added `embedding vector(1536)` column
+- ✅ Created ivfflat index for similarity search
+- ✅ Created `match_knowledge()` function
+- ✅ Verified all migrations applied successfully
 
--- Create index for similarity search
-CREATE INDEX IF NOT EXISTS idx_knowledge_embedding
-ON support.knowledge_base
-USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
+**Next**: Populate embeddings via migration script
 
--- Create similarity search function
-CREATE OR REPLACE FUNCTION support.match_knowledge(
-  query_embedding vector(1536),
-  match_threshold float,
-  match_count int
-)
-RETURNS TABLE (
-  id uuid,
-  question text,
-  answer text,
-  category varchar,
-  similarity float
-)
-LANGUAGE sql STABLE
-AS $$
-  SELECT
-    id,
-    question,
-    answer,
-    category,
-    1 - (embedding <=> query_embedding) as similarity
-  FROM support.knowledge_base
-  WHERE 1 - (embedding <=> query_embedding) > match_threshold
-    AND is_active = true
-  ORDER BY embedding <=> query_embedding
-  LIMIT match_count;
-$$;
-```
+### Step 2: Database-First KB Setup (REVISED APPROACH)
 
-### Step 2: Migration Script
+**Strategic Decision**: Database as primary source, YAML exports for version control
 
-**Create** `scripts/migrate-knowledge-base.js`:
-```javascript
-const fs = require('fs');
-const { createClient } = require('@supabase/supabase-js');
-const OpenAI = require('openai');
+**Architecture**:
+- **Database** = Primary source (scalable to 1000+ entries)
+- **YAML export** = Git backup (weekly export for audit trail)
+- **knowledge-base.md → pm-next-documentation.md** = Feature documentation (separate concern)
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+**Why Database-First**:
+✅ Scalability: Handles 1000+ entries without merge conflicts
+✅ Maintenance: Edit via UI, not text files
+✅ Analytics: Track helpful/not_helpful, usage counts built-in
+✅ Collaboration: No merge conflicts on concurrent edits
+✅ Search: Database + vector + full-text search capabilities
 
-async function parseKnowledgeBase() {
-  const content = fs.readFileSync('knowledge-base.md', 'utf-8');
-  const pairs = [];
+**Implementation Steps**:
 
-  // Parse Q&A format from markdown
-  // Adjust regex based on actual format in knowledge-base.md
-  const sections = content.split(/^###\s+/m);
+1. **Separate Documentation Concerns**:
+   ```bash
+   # Rename current file to feature documentation
+   mv knowledge-base.md pm-next-documentation.md
+   # This 305-line file is 60% feature docs, 40% Q&A - keep as developer reference
+   ```
 
-  for (const section of sections) {
-    if (!section.trim()) continue;
+2. **Enhance Database Schema**:
+   ```sql
+   ALTER TABLE support.knowledge_base
+   ADD COLUMN IF NOT EXISTS keywords TEXT[] DEFAULT '{}',
+   ADD COLUMN IF NOT EXISTS difficulty VARCHAR(20) CHECK (difficulty IN ('easy', 'medium', 'hard')),
+   ADD COLUMN IF NOT EXISTS helpful_count INT DEFAULT 0,
+   ADD COLUMN IF NOT EXISTS not_helpful_count INT DEFAULT 0,
+   ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'manual',
+   ADD COLUMN IF NOT EXISTS search_vector tsvector
+     GENERATED ALWAYS AS (to_tsvector('english', question || ' ' || answer)) STORED;
 
-    const lines = section.split('\n');
-    const question = lines[0].replace(/^Q:\s*/i, '').trim();
-    const answerLines = [];
+   CREATE INDEX idx_kb_keywords ON support.knowledge_base USING gin(keywords);
+   CREATE INDEX idx_kb_search ON support.knowledge_base USING gin(search_vector);
+   ```
 
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].startsWith('**A**') || lines[i].startsWith('A:')) {
-        answerLines.push(...lines.slice(i + 1));
-        break;
-      }
-    }
+3. **Manually Insert Initial Q&As** (20-25 entries):
+   - Extract 8 existing Q&A entries from documentation
+   - Add 10-15 common questions you anticipate
+   - Use proper structure: question, answer, category, keywords, difficulty
 
-    const answer = answerLines.join('\n').trim();
+4. **Create Embedding Generation Script**:
+   ```javascript
+   // scripts/generate-kb-embeddings.js
+   // Reads existing entries from database (where embedding IS NULL)
+   // Generates embeddings using OpenAI API
+   // Updates database with embeddings
+   // Rate limit: 350ms between calls
+   ```
 
-    if (question && answer) {
-      pairs.push({ question, answer, category: 'general' });
-    }
-  }
+5. **Optional: Create Export Script for Git Backup**:
+   ```javascript
+   // scripts/export-kb-to-yaml.js
+   // Exports database → knowledge-base.yaml
+   // Run weekly or on-demand
+   // Commit to git for version control and audit trail
+   ```
 
-  return pairs;
-}
+**Test Strategy**:
+1. Insert 20-25 Q&A entries manually
+2. Run embedding generation on first 5 entries
+3. Verify embeddings are valid vector(1536)
+4. Run full generation for all entries
+5. Test similarity search returns relevant results
+6. Verify keyword search works via search_vector
 
-async function migrateToDatabase() {
-  const pairs = await parseKnowledgeBase();
-  console.log(`📚 Found ${pairs.length} Q&A pairs`);
+### Step 3: Hybrid Knowledge Service
 
-  for (const pair of pairs) {
-    // Generate embedding
-    const embeddingResponse = await openai.embeddings.create({
-      model: 'text-embedding-ada-002',
-      input: pair.question
-    });
+**Update `services/knowledge_service.js`** to support both AI and user search:
 
-    const embedding = embeddingResponse.data[0].embedding;
-
-    // Insert into database
-    const { error } = await supabase
-      .from('knowledge_base')
-      .insert({
-        question: pair.question,
-        answer: pair.answer,
-        category: pair.category,
-        embedding: embedding,
-        source: 'migration',
-        is_active: true
-      });
-
-    if (error) {
-      console.error('❌ Error inserting:', pair.question.substring(0, 50), error);
-    } else {
-      console.log('✅ Migrated:', pair.question.substring(0, 50));
-    }
-
-    // Rate limit: 3 requests/second for embeddings API
-    await new Promise(resolve => setTimeout(resolve, 350));
-  }
-
-  console.log('🎉 Migration complete!');
-}
-
-migrateToDatabase();
-```
-
-**Run Migration**:
-```bash
-node scripts/migrate-knowledge-base.js
-```
-
-### Step 3: Update Knowledge Service
-
-**In services/knowledge_service.js**:
+**New Methods**:
 ```javascript
 class KnowledgeService {
-  constructor(supabase, openai) {
-    this.supabase = supabase;
-    this.openai = openai;
+  // For AI: Vector similarity search (existing)
+  async searchForAI(query, limit = 5) {
+    // Generate embedding → search vector DB
+    // Returns: Top 5 most relevant KB entries
+    // Use: AI system prompt context
   }
 
-  async search(query, limit = 5) {
-    try {
-      // Generate embedding for query
-      const embeddingResponse = await this.openai.embeddings.create({
-        model: 'text-embedding-ada-002',
-        input: query
-      });
+  // For users: Hybrid keyword + vector search (NEW)
+  async searchForUsers(query, limit = 10) {
+    // 1. Try exact keyword match first (fast)
+    // 2. Fall back to vector search if no matches
+    // Returns: Formatted KB articles with confidence scores
+    // Use: Direct user responses (no AI needed)
+  }
 
-      const queryEmbedding = embeddingResponse.data[0].embedding;
+  // Track feedback (NEW)
+  async recordFeedback(entryId, wasHelpful) {
+    // Update helpful_count or not_helpful_count
+    // Use: Confidence scoring (Phase 3)
+  }
 
-      // Search similar entries
-      const { data, error } = await this.supabase
-        .rpc('match_knowledge', {
-          query_embedding: queryEmbedding,
-          match_threshold: 0.7,
-          match_count: limit
-        });
-
-      if (error) {
-        console.error('❌ Knowledge search error:', error);
-        return [];
-      }
-
-      return data || [];
-    } catch (error) {
-      console.error('❌ Exception in knowledge search:', error);
-      return [];
-    }
+  // Keep existing getContent() as fallback
+  getContent() {
+    // Static markdown content (unchanged)
+    // Use: Fallback if DB search fails
   }
 }
 ```
 
-### Step 4: Remove Static KB Loading
-
-**In server.js**, delete:
+**Key Decision Logic**:
 ```javascript
-// DELETE THESE LINES:
-const PM_NEXT_KNOWLEDGE = '';
-function loadKnowledgeBase() { ... }
-loadKnowledgeBase();
+// In handleMessage flow:
+1. Check if question matches KB (quick vector search, threshold > 0.85)
+2. If confident match → Return KB article directly (no AI call)
+3. If uncertain (0.6-0.85) → Show KB + offer AI help
+4. If no match (< 0.6) → Full AI response with top 3-5 KB context
+```
 
-// UPDATE generateAIResponse to use:
-const relevantKB = await knowledge.search(userMessage, 5);
-const kbContext = relevantKB.map(k => `Q: ${k.question}\nA: ${k.answer}`).join('\n\n');
+### Step 4: Update AI Service (Hybrid Response Flow)
 
-// In system prompt:
-Use this relevant knowledge:
+**In `services/ai_service.js`**, update `generateResponse()`:
+
+**OLD (inefficient)**:
+```javascript
+Use this knowledge base about PM-Next:
+${this.knowledgeService.getContent()}  // 1,200+ tokens every time
+```
+
+**NEW (intelligent)**:
+```javascript
+async generateResponse(userMessage, chatId, ...) {
+  // STEP 1: Try KB-only response first (no AI needed)
+  const kbResults = await this.knowledgeService.searchForUsers(userMessage);
+
+  if (kbResults.length > 0 && kbResults[0].similarity > 0.85) {
+    // High confidence KB match - return directly
+    return formatKBResponse(kbResults[0]) + "\n\nWas this helpful? 👍 👎";
+  }
+
+  // STEP 2: KB wasn't confident enough - use AI with relevant context
+  const relevantKB = await this.knowledgeService.searchForAI(userMessage, 5);
+  const kbContext = relevantKB
+    .map(k => `Q: ${k.question}\nA: ${k.answer}`)
+    .join('\n\n');
+
+  // Only send relevant 3-5 articles (~150-300 tokens vs 1,200+)
+  const systemPrompt = `Use this RELEVANT knowledge:
 ${kbContext}
+
+If none of these articles help, use your general knowledge.`;
+
+  return await this.callOpenAI(systemPrompt, userMessage, context);
+}
+```
+
+**Impact**: 60-70% of questions answered without AI call
+
+### Step 5: Add Feedback Tracking
+
+**Database columns** (Already added in Step 2 schema enhancement):
+- ✅ helpful_count INT DEFAULT 0
+- ✅ not_helpful_count INT DEFAULT 0
+
+**Update message handler** to detect feedback:
+```javascript
+// In handleMessage, detect: 👍 or "helpful" or "yes that helped"
+if (isPositiveFeedback(userMessage)) {
+  await knowledgeService.recordFeedback(lastKBEntryId, true);
+  return "Great! Glad I could help. 😊";
+}
+
+// Detect: 👎 or "not helpful" or "didn't work"
+if (isNegativeFeedback(userMessage)) {
+  await knowledgeService.recordFeedback(lastKBEntryId, false);
+  return "Sorry that didn't help. Let me try a different approach...";
+}
+```
+
+**Analytics Query** (for later):
+```sql
+-- Find low-performing KB entries
+SELECT question, answer, helpful_count, not_helpful_count,
+       (helpful_count::float / NULLIF(helpful_count + not_helpful_count, 0)) as success_rate
+FROM support.knowledge_base
+WHERE (helpful_count + not_helpful_count) > 10
+ORDER BY success_rate ASC
+LIMIT 20;
 ```
 
 ---
