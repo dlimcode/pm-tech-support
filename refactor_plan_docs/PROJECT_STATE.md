@@ -9,25 +9,25 @@
 
 ```yaml
 # CURRENT STATE
-project_phase: "Phase 1 - Monolith Refactoring"
-phase_status: "MINOR CLEANUP PENDING"
-current_task_id: "P1.CLEANUP.FINAL"
-current_task: "Remove dead code (addToConversation function + unused variables)"
+project_phase: "Phase 2 - KB Migration"
+phase_status: "IN PROGRESS"
+current_task_id: "P2.MIGRATION.1"
+current_task: "Create knowledge base migration script"
 
 # COMPLETION TRACKING
-overall_progress_percent: 26
+overall_progress_percent: 40
 phase_0_progress_percent: 100
-phase_1_progress_percent: 98
-phase_2_progress_percent: 0
+phase_1_progress_percent: 100
+phase_2_progress_percent: 17
 phase_3_progress_percent: 0
 phase_4_progress_percent: 0
 phase_5_progress_percent: 0
 
 # LAST SESSION
 last_session_date: "2025-10-23"
-last_task_completed: "Phase 1 Cleanup - Fixed 5 bugs, removed dead code (57 lines), extracted test endpoints (390 lines), added section comments. server.js: 3,091 → 890 lines (71% reduction)."
-last_task_id: "P1.CLEANUP.2"
-next_task_id: "P1.CLEANUP.FINAL"
+last_task_completed: "P2.DB.1 - Added embedding column (vector 1536), created ivfflat index, and match_knowledge similarity search function. Database schema ready for vector embeddings."
+last_task_id: "P2.DB.1"
+next_task_id: "P2.MIGRATION.1"
 
 # BLOCKERS
 blockers:
@@ -49,54 +49,49 @@ production_health: "STABLE (with known bugs)"
 
 ## 🎯 Current Phase Details
 
-### Phase 0: Critical Bug Fixes ✅ CODE COMPLETE
+### Phase 0: Critical Bug Fixes ✅ COMPLETE
 
 **Objective**: Fix statelessness bug to enable all other features
-
-**Key Milestones**:
-- [x] Database tables created (conversation_sessions, active_ticket_flows)
-- [x] Conversation context refactored to use Supabase
-- [x] Ticket flow state refactored to use Supabase
-- [x] All database functions implemented and verified
-- [x] End-to-end verification complete
-- [~] Tests passing (DEFERRED - no deployment access)
-- [~] Deployed to staging for 48hr soak test (DEFERRED - no deployment access)
 
 **Completion Status**: Code Complete (100%)
 **Testing/Deployment**: Deferred until production access available
 
-**Current Focus**: Moving to Phase 1 - Monolith Refactoring
+### Phase 1: Monolith Refactoring ✅ COMPLETE
+
+**Objective**: Extract monolithic server.js into maintainable services
+
+**Completion Status**: 100% Complete
+**Final Result**: server.js reduced from 3,091 → 858 lines (72% reduction)
+
+**Current Focus**: Moving to Phase 2 - KB Migration
 
 ---
 
 ## 📊 What Needs to Happen Next
 
-### Immediate Next Task (P1.CLEANUP.FINAL)
+### Immediate Next Task (P2.MIGRATION.1)
 
-**Task**: Remove dead code and unused variables from server.js
-**Location**: server.js (specific lines identified by TypeScript diagnostics)
-**Files**: server.js only
-**Testing**: Syntax check with `node -c server.js`
-**Risk**: Very Low (removing unused code only)
+**Task**: Create knowledge base migration script
+**Location**: scripts/migrate-knowledge-base.js (new file)
+**Files**: Create new migration script
+**Testing**: Run on small sample first, then full migration
+**Risk**: Medium (depends on knowledge-base.md format, requires OpenAI API)
 
 **Success Criteria**:
-- [ ] Remove `addToConversation` function (lines 59-89) - saves ~30 lines
-- [ ] Remove unused `schema` destructured variable (line 282)
-- [ ] Remove unused `testData` variable (line 577)
-- [ ] Remove unused `kbData` variable (line 593)
-- [ ] Verify syntax with `node -c server.js`
-- [ ] Confirm: server.js reduced to ~860 lines
-- [ ] All TypeScript diagnostics resolved
+- [ ] Create scripts/ directory if needed
+- [ ] Create migrate-knowledge-base.js with parsing logic
+- [ ] Implement OpenAI embedding generation
+- [ ] Add rate limiting (350ms between API calls)
+- [ ] Test on first 5 Q&A pairs
+- [ ] Run full migration
+- [ ] Verify all entries have embeddings
 - [ ] Update PROGRESS_TRACKER.md
-
-**Optional (Low Priority)**:
-- [ ] Rename unused `req` parameters to `_req` in route handlers (cosmetic only)
 
 ### Next 3 Tasks After That
 
-1. **P2.DB.1**: Add embedding column to knowledge_base table
-2. **P2.DB.2**: Create vector index for embeddings
-3. **P2.MIGRATION.1**: Create knowledge base migration script
+1. **P2.SERVICE.1**: Update KnowledgeService to use vector search
+2. **P2.SERVICE.2**: Update AIService to remove static KB loading
+3. **P2.TEST.1**: Test vector search returns relevant results
 
 ---
 
@@ -105,8 +100,8 @@ production_health: "STABLE (with known bugs)"
 ### Active Blockers
 ```yaml
 blockers:
-  - "No deployment access - Phase 0 testing/deployment deferred"
-  - "Note: Not blocking Phase 1 work (code refactoring)"
+  - "No deployment access - Phase 0/1 testing/deployment deferred"
+  - "Note: Not blocking Phase 2 work (KB migration)"
 ```
 
 ### Known Bugs (Not Blocking)
@@ -114,19 +109,14 @@ blockers:
 - Learning loop barely functional (1 entry in 4 months)
 - No interactive Lark cards (text only)
 
-### Code Quality Issues (Minor - Next Task)
-- **Dead Code**: `addToConversation` function defined but never called (lines 59-89)
-- **Unused Variables**: 3 unused destructured variables in server.js
-  - `schema` at line 282
-  - `testData` at line 577
-  - `kbData` at line 593
-- **TypeScript Diagnostics**: 13 warnings (mostly cosmetic unused `req` parameters)
-- **Impact**: None (code works correctly, just cleanup needed)
-- **Priority**: Low (cosmetic cleanup)
+### Code Quality Issues (Minor)
+- **TypeScript Diagnostics**: ~10 warnings (cosmetic unused `req` parameters)
+- **Impact**: None (code works correctly)
+- **Priority**: Low (cosmetic only - can ignore)
 
 ### Technical Debt
-- 2,925-line monolith (being fixed in Phase 1)
-- Inefficient KB loading (being fixed in Phase 2)
+- ~~2,925-line monolith~~ ✅ FIXED - Phase 1 complete (858 lines, 72% reduction)
+- Inefficient KB loading (being fixed in Phase 2 - NEXT)
 - Manual Lark API calls (being fixed in Phase 4)
 
 ---
@@ -136,13 +126,13 @@ blockers:
 ### Code Files
 ```yaml
 server.js:
-  status: "refactoring_complete"
-  size_lines: 890
+  status: "cleanup_complete"
+  size_lines: 858
   original_size: 3091
-  reduced_by: 2201
-  reduction_percent: 71
+  reduced_by: 2233
+  reduction_percent: 72
   current_functions: "Core routing + database helpers"
-  organization: "Well-organized with section comments"
+  organization: "Well-organized with section comments, dead code removed"
 
 services/:
   status: "all_services_extracted"
@@ -171,9 +161,12 @@ project_id: "auclowlvfmvrtfiuqdqf"
 
 tables:
   support.knowledge_base:
-    status: "exists"
+    status: "schema_ready"
     rows: 1
-    needs: "embedding column + migration"
+    embedding_column: "added (vector 1536)"
+    vector_index: "created (ivfflat, cosine similarity)"
+    similarity_function: "match_knowledge (ready)"
+    needs: "migration script to populate embeddings"
 
   support.message_logs:
     status: "exists"
@@ -248,13 +241,14 @@ test_scripts:
 - 28 / 28 tasks completed ✅
 - Status: CODE COMPLETE - All 5 services extracted + cleanup done (Lark, Knowledge, AI, Learning, Ticketing)
 
-**Phase 2** (0% complete):
-- 0 / 18 tasks completed
+**Phase 2** (17% complete):
+- 3 / 18 tasks completed (Database setup ✅)
+- Status: IN PROGRESS - Schema ready, migration script next
 
 **Phase 3-5** (0% complete):
 - 0 / 39 tasks completed
 
-**Overall**: 40 / 107 code tasks completed (37%)
+**Overall**: 43 / 107 code tasks completed (40%)
 **Note**: 13 testing/deployment tasks deferred (not counted in progress)
 
 ### Time Tracking

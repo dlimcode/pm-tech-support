@@ -56,38 +56,6 @@ async function getConversationHistory(chatId) {
   }
 }
 
-async function addToConversation(chatId, userId, userName, message) {
-  try {
-    const history = await getConversationHistory(chatId);
-    history.push({
-      ...message,
-      timestamp: new Date().toISOString()
-    });
-
-    // Keep last 10 messages only
-    const recentHistory = history.slice(-10);
-
-    const { error } = await supabase
-      .from('conversation_sessions')
-      .upsert({
-        chat_id: chatId,
-        user_id: userId,
-        lark_user_name: userName,
-        messages: recentHistory,
-        last_activity: new Date().toISOString(),
-        status: 'active'
-      }, {
-        onConflict: 'chat_id'
-      });
-
-    if (error) {
-      console.error('❌ Error saving conversation:', error);
-    }
-  } catch (error) {
-    console.error('❌ Exception in addToConversation:', error);
-  }
-}
-
 // Ticket flow state management functions
 async function startTicketFlow(chatId, userId, category, originalMessage) {
   try {
@@ -279,7 +247,7 @@ app.use(testRouter);
 app.post('/lark/events', async (req, res) => {
   try {
     console.log('📥 Received Lark event:', JSON.stringify(req.body, null, 2));
-    const { schema, header, event, challenge, type } = req.body;
+    const { header, event, challenge, type } = req.body;
 
     // Handle URL verification (legacy format)
     if (type === 'url_verification') {
@@ -574,7 +542,7 @@ app.post('/test-db-connection', async (req, res) => {
     console.log('🔍 Testing database connection...');
     
     // Test Supabase connection
-    const { data: testData, error: testError } = await supabase
+    const { error: testError } = await supabase
       .schema('support')
       .from('support_tickets')
       .select('count')
@@ -590,7 +558,7 @@ app.post('/test-db-connection', async (req, res) => {
     }
     
     // Test knowledge base table
-    const { data: kbData, error: kbError } = await supabase
+    const { error: kbError } = await supabase
       .from('knowledge_base')
       .select('count')
       .limit(1);
